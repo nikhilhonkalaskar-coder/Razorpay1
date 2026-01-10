@@ -16,7 +16,7 @@ const AMOUNT_1500 = 150000;
 /* ================== MYSQL CONNECTION ================== */
 
 const db = mysql.createPool({
-  host: process.env.DB_HOST || "192.168.1.94",
+  host: process.env.DB_HOST || "https://192.168.1.94/mysqld/",
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASS || "ebiztech99",
   database: process.env.DB_NAME || "tushar_bumkar_institute_database",
@@ -169,5 +169,6 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
