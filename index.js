@@ -21,7 +21,6 @@ const db = mysql.createPool({
   password: process.env.DB_PASS || "ebiztech99",
   database: process.env.DB_NAME || "tushar_bumkar_institute_database",
   waitForConnections: true,
-  connectionLimit: 10,
 });
 
 /* ================== RAW BODY (for signature verification) ================== */
@@ -171,6 +170,7 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
 
