@@ -16,11 +16,13 @@ const AMOUNT_1500 = 150000;
 /* ================== MYSQL CONNECTION ================== */
 
 const db = mysql.createPool({
-  host: process.env.DB_HOST || "192.168.1.94",
+  host: process.env.DB_HOST || "localhost",
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASS || "ebiztech99",
   database: process.env.DB_NAME || "tushar_bumkar_institute_database",
+  port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
   waitForConnections: true,
+  connectionLimit: 10,
 });
 
 /* ================== RAW BODY (for signature verification) ================== */
@@ -62,7 +64,8 @@ function extractPayment(body) {
 
 async function storePaymentToCRM(payment, event) {
   try {
-    if (payment.status !== "captured") {
+    // Store only 'captured' and 'failed' payments
+    if (!["captured", "failed"].includes(payment.status)) {
       console.log(`⏭ Skipped CRM insert (status: ${payment.status})`);
       return;
     }
@@ -109,7 +112,7 @@ async function storePaymentToCRM(payment, event) {
 
 /* ================== WEBHOOK HANDLER ================== */
 
-app.post("/razorpay-webhook", async (req, res) => {
+app.post("/razorpay-webhook", (req, res) => {
   console.log("\n📩 Webhook received");
 
   if (!verifySignature(req)) {
@@ -117,14 +120,14 @@ app.post("/razorpay-webhook", async (req, res) => {
     return res.status(400).send("Invalid signature");
   }
 
-  res.status(200).send("OK");
+  res.status(200).send("OK"); // Respond immediately
 
   setTimeout(async () => {
     try {
       const body = req.body;
       const event = body.event;
 
-      // Only handle payment events you want
+      // Only handle specific payment events
       if (
         ![
           "payment.created",
@@ -170,8 +173,3 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
-
-
-
-
