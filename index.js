@@ -1,28 +1,24 @@
+require("dotenv").config();
 const express = require("express");
 const crypto = require("crypto");
-const mysql = require("mysql2/promise");
+const axios = require("axios");
 
 const app = express();
 
 /* ================== CONFIG ================== */
 
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "Tbipl@123";
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
+// CRM API endpoint (external)
+const CRM_API_URL = process.env.CRM_API_URL;
+const CRM_API_KEY = process.env.CRM_API_KEY;
 
 // Payment amounts in paise
 const AMOUNT_99 = 9900;
 const AMOUNT_1500 = 150000;
 
-/* ================== MYSQL CONNECTION ================== */
-
-const db = mysql.createPool({
-  host: process.env.DB_HOST || "crm.tusharbhumkar.com",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASS || "ebiztech99",
- database: process.env.DB_NAME || "tushar_bumkar_institute_database",
-});
-
-/* ================== RAW BODY (for signature verification) ================== */
+/* ================== RAW BODY ================== */
 
 app.use(
   express.json({
@@ -33,13 +29,6 @@ app.use(
 );
 
 /* ================== HELPERS ================== */
-
-function timestampInKolkata(unixSeconds) {
-  return new Date(unixSeconds * 1000).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour12: false,
-  });
-}
 
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
@@ -57,117 +46,72 @@ function extractPayment(body) {
   return body?.payload?.payment?.entity || null;
 }
 
-/* ================== STORE PAYMENT TO CRM ================== */
+/* ================== SEND TO CRM API ================== */
 
-async function storePaymentToCRM(payment, event) {
-  try {
-    if (payment.status !== "captured") {
-      console.log(`⏭ Skipped CRM insert (status: ${payment.status})`);
-      return;
-    }
-
-    const insertSql = (table) => `INSERT INTO ${table}
-      (payment_id, order_id, email, phone, customer_name, city, amount, currency, status, event, method, paid_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE payment_id = payment_id`;
-
-    const params = [
-      payment.id,
-      payment.order_id,
-      payment.email || "",
-      payment.contact || "",
-      payment.notes?.name || "",
-      payment.notes?.city || "",
-      payment.amount / 100,
-      payment.currency,
-      payment.status,
-      event,
-      payment.method,
-      new Date(payment.created_at * 1000),
-    ];
-
-    // Insert into master table always
-    await db.execute(insertSql("crm_payments"), params);
-    console.log(`✅ Stored in crm_payments: ${payment.id}`);
-
-    // Insert into 99 table if ₹99 payment
-    if (payment.amount === AMOUNT_99) {
-      await db.execute(insertSql("crm_99"), params);
-      console.log(`✅ Stored in crm_99: ${payment.id}`);
-    }
-
-    // Insert into 1500 table if ₹1500 payment
-    if (payment.amount === AMOUNT_1500) {
-      await db.execute(insertSql("crm_1500"), params);
-      console.log(`✅ Stored in crm_1500: ${payment.id}`);
-    }
-  } catch (err) {
-    console.error("❌ CRM DB Error:", err.message);
-  }
+async function sendToCRMAPI(data) {
+  await axios.post(CRM_API_URL, data, {
+    headers: {
+      "x-api-key": CRM_API_KEY,
+      "Content-Type": "application/json",
+    },
+    timeout: 5000,
+  });
 }
 
-/* ================== WEBHOOK HANDLER ================== */
+/* ================== WEBHOOK ================== */
 
 app.post("/razorpay-webhook", async (req, res) => {
-  console.log("\n📩 Webhook received");
+  console.log("📩 Webhook received");
 
   if (!verifySignature(req)) {
-    console.log("❌ Invalid signature");
     return res.status(400).send("Invalid signature");
   }
 
-  res.status(200).send("OK");
+  res.send("OK");
 
-  setTimeout(async () => {
-    try {
-      const body = req.body;
-      const event = body.event;
+  const body = req.body;
+  const event = body.event;
+  const payment = extractPayment(body);
 
-      // Only handle payment events you want
-      if (
-        ![
-          "payment.created",
-          "payment.authorized",
-          "payment.captured",
-          "payment.failed",
-        ].includes(event)
-      ) {
-        console.log(`⏭ Skipping event: ${event}`);
-        return;
-      }
+  if (!payment || payment.status !== "captured") return;
 
-      const payment = extractPayment(body);
-      if (!payment) {
-        console.log("⏭ No payment data found");
-        return;
-      }
+  const payload = {
+    payment_id: payment.id,
+    order_id: payment.order_id,
+    email: payment.email || "",
+    phone: payment.contact || "",
+    customer_name: payment.notes?.name || "",
+    city: payment.notes?.city || "",
+    amount: payment.amount / 100,
+    currency: payment.currency,
+    status: payment.status,
+    event,
+    method: payment.method,
+    paid_at: new Date(payment.created_at * 1000),
+    slab:
+      payment.amount === AMOUNT_99
+        ? "99"
+        : payment.amount === AMOUNT_1500
+        ? "1500"
+        : "other",
+  };
 
-      const time = timestampInKolkata(payment.created_at);
-      console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-      console.log(`[${time}] 💳 Status: ${payment.status} (${event})`);
-      console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
-      console.log(`[${time}] 📞 Contact: ${payment.contact || "N/A"}`);
-      console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
-      console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
-      console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount / 100}`);
-
-      await storePaymentToCRM(payment, event);
-    } catch (err) {
-      console.error("❌ Webhook processing error:", err);
-    }
-  }, 5);
+  try {
+    await sendToCRMAPI(payload);
+    console.log("✅ Sent to CRM API:", payment.id);
+  } catch (err) {
+    console.error("❌ CRM API Error:", err.message);
+  }
 });
 
-/* ================== TEST ROUTE ================== */
+/* ================== TEST ================== */
 
-app.get("/razorpay-webhook", (req, res) => {
-  res.status(200).send("✔ Razorpay Webhook Active (CRM ONLY)");
+app.get("/", (req, res) => {
+  res.send("🚀 Webhook API Running (No DB)");
 });
 
-/* ================== START SERVER ================== */
+/* ================== START ================== */
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
-
