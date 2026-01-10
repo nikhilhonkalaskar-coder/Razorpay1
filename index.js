@@ -16,10 +16,10 @@ const AMOUNT_1500 = 150000;
 /* ================== MYSQL CONNECTION ================== */
 
 const db = mysql.createPool({
-  host: process.env.DB_HOST || "192.168.1.94",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASS || "ebiztech99",
-  database: process.env.DB_NAME || "tushar_bumkar_institute_database",
+  host: process.env.DB_HOST || "jdbc:postgresql://aws-1-ap-south-1.pooler.supabase.com:5432/postgres",
+  user: process.env.DB_USER || "postgres.rdutjyuqvnzkgjodamue",
+  password: process.env.DB_PASS || "5DsbSqyMbDgA3Ibw",
+  // database: process.env.DB_NAME || "tushar_bumkar_institute_database",
 });
 
 /* ================== RAW BODY (for signature verification) ================== */
@@ -169,6 +169,7 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
 
