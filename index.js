@@ -20,6 +20,10 @@ const db = mysql.createPool({
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASS || "ebiztech99",
   database: process.env.DB_NAME || "tushar_bumkar_institute_database",
+  // Add connection limits for stability
+  connectionLimit: 10,
+  acquireTimeout: 60000,
+  timeout: 60000,
 });
 
 /* ================== RAW BODY (for signature verification) ================== */
@@ -43,14 +47,23 @@ function timestampInKolkata(unixSeconds) {
 
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
-  if (!signature) return false;
+  if (!signature) {
+    console.log("❌ Signature header missing.");
+    return false;
+  }
 
   const expected = crypto
     .createHmac("sha256", WEBHOOK_SECRET)
     .update(req.rawBody)
     .digest("hex");
 
-  return expected === signature;
+  const isValid = expected === signature;
+  if (!isValid) {
+    console.log("❌ Signature mismatch.");
+    console.log(`   Received: ${signature}`);
+    console.log(`   Expected: ${expected}`);
+  }
+  return isValid;
 }
 
 function extractPayment(body) {
@@ -61,15 +74,17 @@ function extractPayment(body) {
 
 async function storePaymentToCRM(payment, event) {
   try {
+    // --- KEY LOGIC: Only store payments that are successfully captured ---
+    // This is intentional. You only want to record fully successful transactions.
     if (payment.status !== "captured") {
-      console.log(`⏭ Skipped CRM insert (status: ${payment.status})`);
+      console.log(`⏭ Skipped DB insert for Payment ID: ${payment.id}. Status is '${payment.status}', not 'captured'.`);
       return;
     }
 
     const insertSql = (table) => `INSERT INTO ${table}
       (payment_id, order_id, email, phone, customer_name, city, amount, currency, status, event, method, paid_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE payment_id = payment_id`;
+      ON DUPLICATE KEY UPDATE payment_id = payment_id`; // This assumes `payment_id` is a UNIQUE or PRIMARY key.
 
     const params = [
       payment.id,
@@ -78,7 +93,7 @@ async function storePaymentToCRM(payment, event) {
       payment.contact || "",
       payment.notes?.name || "",
       payment.notes?.city || "",
-      payment.amount / 100,
+      payment.amount / 100, // Convert paise to rupees
       payment.currency,
       payment.status,
       event,
@@ -88,21 +103,24 @@ async function storePaymentToCRM(payment, event) {
 
     // Insert into master table always
     await db.execute(insertSql("crm_payments"), params);
-    console.log(`✅ Stored in crm_payments: ${payment.id}`);
+    console.log(`✅ Successfully stored in crm_payments: ${payment.id}`);
 
     // Insert into 99 table if ₹99 payment
     if (payment.amount === AMOUNT_99) {
       await db.execute(insertSql("crm_99"), params);
-      console.log(`✅ Stored in crm_99: ${payment.id}`);
+      console.log(`✅ Successfully stored in crm_99: ${payment.id}`);
     }
 
     // Insert into 1500 table if ₹1500 payment
     if (payment.amount === AMOUNT_1500) {
       await db.execute(insertSql("crm_1500"), params);
-      console.log(`✅ Stored in crm_1500: ${payment.id}`);
+      console.log(`✅ Successfully stored in crm_1500: ${payment.id}`);
     }
   } catch (err) {
-    console.error("❌ CRM DB Error:", err.message);
+    // --- IMPROVED ERROR LOGGING ---
+    console.error("❌ Database Error during CRM insert for Payment ID:", payment.id);
+    console.error("   Error Message:", err.message);
+    console.error("   Error Stack:", err.stack); // Log the full stack trace for deeper debugging
   }
 }
 
@@ -112,18 +130,19 @@ app.post("/razorpay-webhook", async (req, res) => {
   console.log("\n📩 Webhook received");
 
   if (!verifySignature(req)) {
-    console.log("❌ Invalid signature");
     return res.status(400).send("Invalid signature");
   }
 
+  // Acknowledge receipt immediately
   res.status(200).send("OK");
 
-  setTimeout(async () => {
+  // Process the webhook asynchronously
+  // Using setImmediate is often better than setTimeout for this pattern
+  setImmediate(async () => {
     try {
       const body = req.body;
       const event = body.event;
 
-      // Only handle payment events you want
       if (
         ![
           "payment.created",
@@ -132,30 +151,31 @@ app.post("/razorpay-webhook", async (req, res) => {
           "payment.failed",
         ].includes(event)
       ) {
-        console.log(`⏭ Skipping event: ${event}`);
+        console.log(`⏭ Skipping unhandled event: ${event}`);
         return;
       }
 
       const payment = extractPayment(body);
       if (!payment) {
-        console.log("⏭ No payment data found");
+        console.log("⏭ No payment entity found in webhook payload.");
         return;
       }
 
       const time = timestampInKolkata(payment.created_at);
-      console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-      console.log(`[${time}] 💳 Status: ${payment.status} (${event})`);
-      console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
-      console.log(`[${time}] 📞 Contact: ${payment.contact || "N/A"}`);
-      console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
-      console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
-      console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount / 100}`);
+      console.log(`\n[${time}] Processing Event: ${event}`);
+      console.log(`   💰 Payment ID: ${payment.id}`);
+      console.log(`   💳 Status: ${payment.status}`);
+      console.log(`   👤 Email: ${payment.email || "N/A"}`);
+      console.log(`   📞 Contact: ${payment.contact || "N/A"}`);
+      console.log(`   🧑 Name: ${payment.notes?.name || "N/A"}`);
+      console.log(`   🌆 City: ${payment.notes?.city || "N/A"}`);
+      console.log(`   💵 Amount: ₹${payment.amount / 100}`);
 
       await storePaymentToCRM(payment, event);
     } catch (err) {
-      console.error("❌ Webhook processing error:", err);
+      console.error("❌ Critical error in webhook processing:", err);
     }
-  }, 5);
+  });
 });
 
 /* ================== TEST ROUTE ================== */
