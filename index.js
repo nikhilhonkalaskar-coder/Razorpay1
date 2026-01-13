@@ -16,7 +16,7 @@ const db = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
-  port: 3306,
+  port: 86,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -136,3 +136,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
