@@ -73,20 +73,23 @@ async function storePaymentToCRM(payment, event) {
     ON CONFLICT (payment_id) DO NOTHING
   `;
 
-  const params = [
-    payment.id,
-    payment.order_id,
-    payment.email || "",
-    payment.contact || "",
-    payment.notes?.name || "",
-    payment.notes?.city || "",
-    payment.amount / 100,
-    payment.currency,
-    payment.status,
-    event,
-    payment.method,
-    new Date(payment.created_at * 1000),
-  ];
+ const params = [
+  payment.id,
+  payment.order_id,
+  payment.email || "",
+  payment.contact || "",
+  payment.notes?.name || "",
+  payment.notes?.city || "",
+  payment.amount / 100,
+  payment.currency,
+  payment.status,
+  event,
+  payment.method,
+  payment.captured_at
+    ? new Date(payment.captured_at * 1000)
+    : new Date(), // fallback safety
+];
+
 
   await db.query(sql("crm_payments"), params);
   console.log(`✅ Stored in crm_payments → ${payment.id}`);
@@ -161,5 +164,6 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
