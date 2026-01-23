@@ -23,8 +23,6 @@ const db = new Pool({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
   ssl: { rejectUnauthorized: false },
-  max: 5,
-  connectionTimeoutMillis: 10000,
 });
 
 /* ================== HELPERS ================== */
@@ -180,3 +178,4 @@ app.get("/db-test", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
