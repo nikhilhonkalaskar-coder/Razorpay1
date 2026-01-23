@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
@@ -9,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// Amounts in paise
+// Amount slabs (paise)
 const AMOUNT_99 = 9900;
 const AMOUNT_1500 = 150000;
 
@@ -33,8 +34,22 @@ function timestampInKolkata(unix) {
   });
 }
 
+/* ================== STORE PAYMENT ================== */
+
 async function storePaymentToCRM(payment, event) {
+  // ✅ ONLY captured payments
   if (payment.status !== "captured") return;
+
+  // 🔁 Deduplication (important)
+  const exists = await db.query(
+    "SELECT 1 FROM crm_payments WHERE payment_id = $1",
+    [payment.id]
+  );
+
+  if (exists.rowCount > 0) {
+    console.log("🔁 Duplicate ignored:", payment.id);
+    return;
+  }
 
   const sql = (table) => `
     INSERT INTO ${table}
@@ -46,36 +61,41 @@ async function storePaymentToCRM(payment, event) {
 
   const params = [
     payment.id,
-    payment.order_id,
+    payment.order_id || "",
     payment.email || "",
     payment.contact || "",
     payment.notes?.name || "",
     payment.notes?.city || "",
     payment.amount / 100,
-    payment.currency,
+    payment.currency || "INR",
     payment.status,
     event,
-    payment.method,
-    payment.captured_at
-      ? new Date(payment.captured_at * 1000)
-      : new Date(),
+    payment.method || "",
+    new Date(payment.captured_at * 1000),
   ];
 
+  // 📦 Main table
   await db.query(sql("crm_payments"), params);
   console.log(`✅ Stored in crm_payments → ${payment.id}`);
 
-  if (payment.amount === AMOUNT_99) {
+  // 💰 Slab tables (discount-safe)
+  if (payment.amount <= AMOUNT_99) {
     await db.query(sql("crm_99"), params);
     console.log(`✅ Stored in crm_99 → ${payment.id}`);
   }
 
-  if (payment.amount === AMOUNT_1500) {
+  if (payment.amount > AMOUNT_99 && payment.amount <= AMOUNT_1500) {
     await db.query(sql("crm_1500"), params);
     console.log(`✅ Stored in crm_1500 → ${payment.id}`);
   }
 }
 
-/* ================== WEBHOOK (RAW BODY) ================== */
+/* ================== WEBHOOK ================== */
+/*
+⚠️ IMPORTANT:
+DO NOT use express.json() on this route
+Raw body is REQUIRED for Razorpay signature verification
+*/
 
 app.post(
   "/razorpay-webhook",
@@ -102,14 +122,15 @@ app.post(
       const body = JSON.parse(req.body.toString());
       const event = body.event;
 
-      if (
-        ![
-          "payment.created",
-          "payment.authorized",
-          "payment.captured",
-          "payment.failed",
-        ].includes(event)
-      ) {
+      // 🎯 Process only known events
+      const allowedEvents = [
+        "payment.created",
+        "payment.authorized",
+        "payment.captured",
+        "payment.failed",
+      ];
+
+      if (!allowedEvents.includes(event)) {
         console.log(`⏭ Ignored event: ${event}`);
         return;
       }
@@ -129,7 +150,7 @@ app.post(
 
       await storePaymentToCRM(payment, event);
     } catch (err) {
-      console.error("❌ Webhook processing error:", err.message);
+      console.error("❌ Webhook processing error:", err);
     }
   }
 );
