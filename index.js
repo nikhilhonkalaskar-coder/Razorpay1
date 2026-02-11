@@ -13,6 +13,7 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 // Amounts in paise
 const AMOUNT_99 = 9900;
 const AMOUNT_1500 = 150000;
+const AMOUNT_96 = 9600;
 
 /* ================== POSTGRES CONNECTION ================== */
 
@@ -100,6 +101,11 @@ async function storePaymentToCRM(payment, event) {
     await db.query(sql("crm_1500"), params);
     console.log(`✅ Stored in crm_1500 → ${payment.id}`);
   }
+
+  if (payment.amount === AMOUNT_96) {
+    await db.query(sql("crm_96"), params);
+    cosole.log('✅ stored in crm_96 → ${payment.id}`);
+               }
 }
 
 /* ================== WEBHOOK ================== */
@@ -161,5 +167,6 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
