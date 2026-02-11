@@ -104,7 +104,7 @@ async function storePaymentToCRM(payment, event) {
 
   if (payment.amount === AMOUNT_96) {
     await db.query(sql("crm_96"), params);
-    cosole.log(`✅ stored in crm_96 → ${payment.id}`);
+    console.log(`✅ stored in crm_96 → ${payment.id}`);
                }
 }
 
@@ -167,6 +167,7 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
 
