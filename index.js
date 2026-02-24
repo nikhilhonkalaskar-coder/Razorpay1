@@ -69,8 +69,8 @@ async function storePaymentToCRM(payment, event) {
   const sql = (table) => `
     INSERT INTO ${table}
     (payment_id, order_id, email, phone, customer_name, city,
-     amount, currency, status, event, method)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     amount, currency, status, event, method, paid_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (payment_id) DO NOTHING
   `;
 
@@ -86,6 +86,7 @@ async function storePaymentToCRM(payment, event) {
     payment.status,
     event,
     payment.method,
+    new Date(payment.created_at * 1000),
   ];
 
   await db.query(sql("crm_payments"), params);
