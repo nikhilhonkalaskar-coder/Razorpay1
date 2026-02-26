@@ -3,9 +3,7 @@ const crypto = require("crypto");
 const { Pool } = require("pg");
 
 const app = express();
-
 /* ================== CONFIG ================== */
-
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -164,4 +162,5 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
