@@ -1,20 +1,18 @@
-
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
 const app = express();
 
-/* ================== CONFIG ================== */
+/* ================= CONFIG ================= */
 
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// Amounts in paise
 const AMOUNT_1500 = 150000;
 const AMOUNT_96 = 9600;
 
-/* ================== POSTGRES CONNECTION ================== */
+/* ================= DATABASE ================= */
 
 const db = new Pool({
   host: process.env.DB_HOST,
@@ -22,10 +20,21 @@ const db = new Pool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
+
   ssl: { rejectUnauthorized: false },
+
+  max: 5, // limit connections
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
 });
 
-/* ================== RAW BODY ================== */
+/* ---- detect pool errors ---- */
+
+db.on("error", (err) => {
+  console.error("❌ Unexpected PostgreSQL error:", err);
+});
+
+/* ================= RAW BODY ================= */
 
 app.use(
   express.json({
@@ -35,7 +44,7 @@ app.use(
   })
 );
 
-/* ================== HELPERS ================== */
+/* ================= HELPERS ================= */
 
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
@@ -60,7 +69,7 @@ function timestampInKolkata(unix) {
   });
 }
 
-/* ================== STORE PAYMENT ================== */
+/* ================= SAFE INSERT ================= */
 
 async function insertSafe(table, params, paymentId) {
   const sql = `
@@ -79,13 +88,23 @@ async function insertSafe(table, params, paymentId) {
     } else {
       console.log(`✅ Stored in ${table} → ${paymentId}`);
     }
+
   } catch (err) {
+
+    if (err.code === "ETIMEDOUT") {
+      console.log("⚠️ DB timeout - Razorpay will retry webhook automatically");
+      return;
+    }
+
     console.error(`❌ Insert error in ${table}`);
     console.error(err);
   }
 }
 
+/* ================= STORE PAYMENT ================= */
+
 async function storePaymentToCRM(payment) {
+
   const params = [
     payment.id,
     payment.order_id || "",
@@ -98,14 +117,10 @@ async function storePaymentToCRM(payment) {
     payment.status,
     "payment.captured",
     payment.method,
-    new Date(payment.created_at * 1000),
+    new Date(payment.created_at * 1000)
   ];
 
-  /* ---- Main CRM Table ---- */
-
   await insertSafe("crm_payments", params, payment.id);
-
-  /* ---- Amount Specific Tables ---- */
 
   if (payment.amount === AMOUNT_1500) {
     await insertSafe("crm_1500", params, payment.id);
@@ -116,13 +131,15 @@ async function storePaymentToCRM(payment) {
   }
 }
 
-/* ================== WEBHOOK ================== */
+/* ================= WEBHOOK ================= */
 
 app.post("/razorpay-webhook", async (req, res) => {
+
   console.log("\n📩 Razorpay webhook received");
 
   try {
-    /* ---------- VERIFY SIGNATURE ---------- */
+
+    /* ----- verify signature ----- */
 
     if (!verifySignature(req)) {
       console.log("❌ Signature mismatch");
@@ -132,7 +149,7 @@ app.post("/razorpay-webhook", async (req, res) => {
     const body = req.body;
     const event = body.event;
 
-    /* ---------- ONLY SUCCESS PAYMENT ---------- */
+    /* ----- ignore non-success events ----- */
 
     if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
@@ -156,12 +173,14 @@ app.post("/razorpay-webhook", async (req, res) => {
     console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
     console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
 
-    /* ---------- STORE PAYMENT ---------- */
+    /* ----- store payment ----- */
 
     await storePaymentToCRM(payment);
 
     res.status(200).send("OK");
+
   } catch (err) {
+
     console.error("❌ Webhook error:");
     console.error(err);
     console.error(err.stack);
@@ -170,15 +189,14 @@ app.post("/razorpay-webhook", async (req, res) => {
   }
 });
 
-/* ================== TEST ROUTE ================== */
+/* ================= TEST ROUTE ================= */
 
 app.get("/razorpay-webhook", (req, res) => {
   res.send("✔ Razorpay Webhook Active (PostgreSQL CRM)");
 });
 
-/* ================== START SERVER ================== */
+/* ================= START SERVER ================= */
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
