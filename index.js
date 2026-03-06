@@ -1,3 +1,4 @@
+
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
@@ -20,17 +21,9 @@ const db = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 6543, // IMPORTANT for Supabase pooler
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  port: process.env.DB_PORT || 5432,
+  ssl: { rejectUnauthorized: false },
 });
-
-/* ---------- Test DB connection on startup ---------- */
-
-db.connect()
-  .then(() => console.log("✅ PostgreSQL connected"))
-  .catch((err) => console.error("❌ PostgreSQL connection error:", err));
 
 /* ================== RAW BODY ================== */
 
@@ -188,3 +181,4 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
