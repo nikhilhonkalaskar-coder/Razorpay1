@@ -4,15 +4,16 @@ const { Pool } = require("pg");
 
 const app = express();
 
-/* ================= CONFIG ================= */
+/* ================== CONFIG ================== */
 
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
+// Amounts in paise
 const AMOUNT_1500 = 150000;
 const AMOUNT_96 = 9600;
 
-/* ================= DATABASE ================= */
+/* ================== POSTGRES CONNECTION ================== */
 
 const db = new Pool({
   host: process.env.DB_HOST,
@@ -20,21 +21,10 @@ const db = new Pool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
-
   ssl: { rejectUnauthorized: false },
-
-  max: 5, // limit connections
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
 });
 
-/* ---- detect pool errors ---- */
-
-db.on("error", (err) => {
-  console.error("❌ Unexpected PostgreSQL error:", err);
-});
-
-/* ================= RAW BODY ================= */
+/* ================== RAW BODY ================== */
 
 app.use(
   express.json({
@@ -44,7 +34,7 @@ app.use(
   })
 );
 
-/* ================= HELPERS ================= */
+/* ================== HELPERS ================== */
 
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
@@ -69,45 +59,22 @@ function timestampInKolkata(unix) {
   });
 }
 
-/* ================= SAFE INSERT ================= */
+/* ================== STORE PAYMENT ================== */
 
-async function insertSafe(table, params, paymentId) {
-  const sql = `
+async function storePaymentToCRM(payment) {
+  if (payment.status !== "captured") return;
+
+  const sql = (table) => `
     INSERT INTO ${table}
     (payment_id, order_id, email, phone, customer_name, city,
-     amount, currency, status, event, method, paid_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     amount, currency, status, method, paid_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     ON CONFLICT (payment_id) DO NOTHING
   `;
 
-  try {
-    const result = await db.query(sql, params);
-
-    if (result.rowCount === 0) {
-      console.log(`⚠️ Duplicate ignored in ${table} → ${paymentId}`);
-    } else {
-      console.log(`✅ Stored in ${table} → ${paymentId}`);
-    }
-
-  } catch (err) {
-
-    if (err.code === "ETIMEDOUT") {
-      console.log("⚠️ DB timeout - Razorpay will retry webhook automatically");
-      return;
-    }
-
-    console.error(`❌ Insert error in ${table}`);
-    console.error(err);
-  }
-}
-
-/* ================= STORE PAYMENT ================= */
-
-async function storePaymentToCRM(payment) {
-
   const params = [
     payment.id,
-    payment.order_id || "",
+    payment.order_id,
     payment.email || "",
     payment.contact || "",
     payment.notes?.name || "",
@@ -115,53 +82,56 @@ async function storePaymentToCRM(payment) {
     payment.amount / 100,
     payment.currency,
     payment.status,
-    "payment.captured",
     payment.method,
-    new Date(payment.created_at * 1000)
+    new Date(payment.created_at * 1000),
   ];
 
-  await insertSafe("crm_payments", params, payment.id);
+  /* store in master CRM */
+  await db.query(sql("crm_payments"), params);
+  console.log(`✅ Stored in crm_payments → ${payment.id}`);
+
+  /* store based on product price */
 
   if (payment.amount === AMOUNT_1500) {
-    await insertSafe("crm_1500", params, payment.id);
+    await db.query(sql("crm_1500"), params);
+    console.log(`✅ Stored in crm_1500 → ${payment.id}`);
   }
 
   if (payment.amount === AMOUNT_96) {
-    await insertSafe("crm_96", params, payment.id);
+    await db.query(sql("crm_96"), params);
+    console.log(`✅ Stored in crm_96 → ${payment.id}`);
   }
 }
 
-/* ================= WEBHOOK ================= */
+/* ================== WEBHOOK ================== */
 
 app.post("/razorpay-webhook", async (req, res) => {
-
   console.log("\n📩 Razorpay webhook received");
 
+  /* verify signature */
+
+  if (!verifySignature(req)) {
+    console.log("❌ Signature mismatch");
+    return res.status(400).send("Invalid signature");
+  }
+
+  /* acknowledge webhook immediately */
+
+  res.status(200).send("OK");
+
   try {
-
-    /* ----- verify signature ----- */
-
-    if (!verifySignature(req)) {
-      console.log("❌ Signature mismatch");
-      return res.status(400).send("Invalid signature");
-    }
-
     const body = req.body;
     const event = body.event;
 
-    /* ----- ignore non-success events ----- */
+    /* ONLY PROCESS CAPTURED PAYMENT */
 
     if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
-      return res.status(200).send("Ignored");
+      return;
     }
 
     const payment = extractPayment(body);
-
-    if (!payment) {
-      console.log("❌ Payment object missing");
-      return res.status(400).send("No payment object");
-    }
+    if (!payment) return;
 
     const time = timestampInKolkata(payment.created_at);
 
@@ -173,29 +143,20 @@ app.post("/razorpay-webhook", async (req, res) => {
     console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
     console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
 
-    /* ----- store payment ----- */
-
     await storePaymentToCRM(payment);
 
-    res.status(200).send("OK");
-
   } catch (err) {
-
-    console.error("❌ Webhook error:");
-    console.error(err);
-    console.error(err.stack);
-
-    res.status(500).send("Server error");
+    console.error("❌ Webhook error:", err);
   }
 });
 
-/* ================= TEST ROUTE ================= */
+/* ================== TEST ROUTE ================== */
 
 app.get("/razorpay-webhook", (req, res) => {
   res.send("✔ Razorpay Webhook Active (PostgreSQL CRM)");
 });
 
-/* ================= START SERVER ================= */
+/* ================== START SERVER ================== */
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
