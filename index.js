@@ -9,24 +9,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// Amounts in paise
-const AMOUNT_1500 = 150000;
-const AMOUNT_96 = 9600;
-
 /* ================== POSTGRES CONNECTION ================== */
 
 const db = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 6543,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
-/* ================== RAW BODY ================== */
+/* ================== RAW BODY (REQUIRED FOR RAZORPAY) ================== */
 
 app.use(
   express.json({
@@ -62,7 +52,7 @@ function timestampInKolkata(unix) {
   });
 }
 
-/* ================== INSERT PAYMENT ================== */
+/* ================== SAFE INSERT ================== */
 
 async function insertSafe(table, params, paymentId) {
 
@@ -112,19 +102,7 @@ async function storePaymentToCRM(payment) {
     new Date(payment.created_at * 1000)
   ];
 
-  /* ---- Main CRM Table ---- */
-
   await insertSafe("crm_payments", params, payment.id);
-
-  /* ---- Amount Specific Tables ---- */
-
-  if (payment.amount === AMOUNT_1500) {
-    await insertSafe("crm_1500", params, payment.id);
-  }
-
-  if (payment.amount === AMOUNT_96) {
-    await insertSafe("crm_96", params, payment.id);
-  }
 
 }
 
@@ -145,8 +123,6 @@ app.post("/razorpay-webhook", async (req, res) => {
 
     const body = req.body;
     const event = body.event;
-
-    /* ---------- ONLY SUCCESS PAYMENTS ---------- */
 
     if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
@@ -189,8 +165,8 @@ app.post("/razorpay-webhook", async (req, res) => {
 
 /* ================== TEST ROUTE ================== */
 
-app.get("/razorpay-webhook", (req, res) => {
-  res.send("✔ Razorpay Webhook Active (PostgreSQL CRM)");
+app.get("/", (req, res) => {
+  res.send("✔ Razorpay Webhook Active");
 });
 
 /* ================== START SERVER ================== */
