@@ -4,6 +4,16 @@ const { Pool } = require("pg");
 
 const app = express();
 
+/* ================== GLOBAL ERROR PROTECTION ================== */
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Promise Rejection:", err);
+});
+
 /* ================== CONFIG ================== */
 
 const PORT = process.env.PORT || 3000;
@@ -21,8 +31,29 @@ const db = new Pool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
+
   ssl: { rejectUnauthorized: false },
+
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
+
+/* handle pool errors */
+
+db.on("error", (err) => {
+  console.error("Unexpected PostgreSQL pool error", err);
+});
+
+/* keep DB alive (Render idle protection) */
+
+setInterval(async () => {
+  try {
+    await db.query("SELECT 1");
+  } catch (err) {
+    console.log("Keepalive DB error:", err.message);
+  }
+}, 30000);
 
 /* ================== RAW BODY ================== */
 
@@ -87,10 +118,11 @@ async function storePaymentToCRM(payment) {
   ];
 
   /* store in master CRM */
+
   await db.query(sql("crm_payments"), params);
   console.log(`✅ Stored in crm_payments → ${payment.id}`);
 
-  /* store based on product price */
+  /* store based on product */
 
   if (payment.amount === AMOUNT_1500) {
     await db.query(sql("crm_1500"), params);
@@ -106,6 +138,7 @@ async function storePaymentToCRM(payment) {
 /* ================== WEBHOOK ================== */
 
 app.post("/razorpay-webhook", async (req, res) => {
+
   console.log("\n📩 Razorpay webhook received");
 
   /* verify signature */
@@ -123,7 +156,7 @@ app.post("/razorpay-webhook", async (req, res) => {
     const body = req.body;
     const event = body.event;
 
-    /* ONLY PROCESS CAPTURED PAYMENT */
+    /* only process captured payments */
 
     if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
@@ -154,6 +187,17 @@ app.post("/razorpay-webhook", async (req, res) => {
 
 app.get("/razorpay-webhook", (req, res) => {
   res.send("✔ Razorpay Webhook Active (PostgreSQL CRM)");
+});
+
+/* ================== HEALTH CHECK ================== */
+
+app.get("/health", async (req, res) => {
+  try {
+    await db.query("SELECT 1");
+    res.send("Server + DB OK");
+  } catch (err) {
+    res.status(500).send("Database Error");
+  }
 });
 
 /* ================== START SERVER ================== */
