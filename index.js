@@ -18,6 +18,8 @@ const AMOUNT_96 = 9600;
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: 10,
+  idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000
 });
 
@@ -84,23 +86,29 @@ async function storePaymentToCRM(payment, event) {
     new Date(payment.created_at * 1000),
   ];
 
+  let client;
+
   try {
 
-    await pool.query(sql("crm_payments"), params);
+    client = await pool.connect();
+
+    await client.query(sql("crm_payments"), params);
     console.log(`✅ Stored in crm_payments → ${payment.id}`);
 
     if (payment.amount === AMOUNT_1500) {
-      await pool.query(sql("crm_1500"), params);
+      await client.query(sql("crm_1500"), params);
       console.log(`✅ Stored in crm_1500 → ${payment.id}`);
     }
 
     if (payment.amount === AMOUNT_96) {
-      await pool.query(sql("crm_96"), params);
+      await client.query(sql("crm_96"), params);
       console.log(`✅ Stored in crm_96 → ${payment.id}`);
     }
 
   } catch (err) {
     console.error("❌ DB Insert Error:", err.message);
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -115,7 +123,6 @@ app.post("/razorpay-webhook", async (req, res) => {
     return res.status(400).send("Invalid signature");
   }
 
-  // ACK Razorpay immediately
   res.status(200).send("OK");
 
   try {
