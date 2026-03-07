@@ -15,10 +15,9 @@ const AMOUNT_1500 = 150000;
 /* ================== POSTGRES CONNECTION ================== */
 
 const db = new Pool({
-  connectionString:
-    "postgresql://postgres.rdutjyuqvnzkgjodamue:KW4mEF3ZRLWqiZsg@aws-1-ap-south-1.pooler.supabase.com:6543/postgres",
+  connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false
+    rejectUnauthorized: false // This is required for Supabase connections
   }
 });
 
@@ -176,4 +175,5 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
