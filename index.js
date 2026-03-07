@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 10000;
 /* ===== SUPABASE DATABASE CONNECTION ===== */
 
 const connectionString =
-"postgresql://postgres.rdutjyuqvnzkgjodamue:an56FKShapW452gx@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
+"postgresql://postgres.rdutjyuqvnzkgjodamue:m8Z3XgBu1owxSHfQ@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
 
 const pool = new Pool({
   connectionString,
@@ -112,3 +112,4 @@ app.post("/webhook", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
