@@ -15,10 +15,13 @@ const AMOUNT_1500 = 150000;
 /* ================== POSTGRES CONNECTION ================== */
 
 const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false // This is required for Supabase connections
-  }
+  host: "aws-1-ap-south-1.pooler.supabase.com",
+  user: "postgres.rdutjyuqvnzkgjodamue",
+  password: "5DsbSqyMbDgA3Ibw",
+  database: "postgres",
+  port: 5432,
+  ssl: { rejectUnauthorized: false },
+  max: 10
 });
 
 /* ================== DB CONNECTION TEST ================== */
@@ -131,24 +134,7 @@ app.post("/razorpay-webhook", async (req, res) => {
 
   const time = timestampInKolkata(payment.created_at);
 
-  /* ===== LOG PAYMENT DETAILS ===== */
-
-  const amount = payment.amount ? payment.amount / 100 : 0;
-  const email = payment.email || "N/A";
-  const phone = payment.contact || "N/A";
-  const name = payment.notes?.name || "N/A";
-  const city = payment.notes?.city || "N/A";
-
-  console.log("\n================ PAYMENT RECEIVED ================");
-  console.log(`[${time}] 💰 Payment ID : ${payment.id}`);
-  console.log(`[${time}] 💳 Status     : ${payment.status}`);
-  console.log(`[${time}] 💵 Amount     : ₹${amount}`);
-  console.log(`[${time}] 🏦 Method     : ${payment.method}`);
-  console.log(`[${time}] 👤 Email      : ${email}`);
-  console.log(`[${time}] 📞 Phone      : ${phone}`);
-  console.log(`[${time}] 🧑 Name       : ${name}`);
-  console.log(`[${time}] 🌆 City       : ${city}`);
-  console.log("=================================================\n");
+  console.log(`[${time}] ${event} | ${payment.id} | ₹${payment.amount / 100}`);
 
   try {
 
@@ -175,5 +161,3 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
-
