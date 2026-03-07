@@ -7,36 +7,28 @@ const app = express();
 /* ================== CONFIG ================== */
 
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "Tbipl@123";
 
-/* Payment amounts */
 const AMOUNT_96 = 9600;
 const AMOUNT_1500 = 150000;
 
-/* ================== DATABASE ================== */
+/* ================== POSTGRES CONNECTION ================== */
 
 const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  },
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
+  host: "aws-1-ap-south-1.pooler.supabase.com",
+  user: "postgres.rdutjyuqvnzkgjodamue",
+  password: "KW4mEF3ZRLWqiZsg",
+  database: "postgres",
+  port: 5432,
+  ssl: { rejectUnauthorized: false },
+  max: 10
 });
 
-/* Test connection */
+/* ================== DB CONNECTION TEST ================== */
 
-async function testDB() {
-  try {
-    await db.query("SELECT NOW()");
-    console.log("✅ PostgreSQL Connected");
-  } catch (err) {
-    console.error("❌ DB Connection Error:", err.message);
-  }
-}
-
-testDB();
+db.query("SELECT NOW()")
+  .then(() => console.log("✅ PostgreSQL Connected"))
+  .catch(err => console.error("❌ DB Connection Error:", err.message));
 
 /* ================== RAW BODY ================== */
 
@@ -61,7 +53,7 @@ function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
 
   if (!signature) {
-    console.log("❌ Missing Razorpay signature");
+    console.log("❌ Missing signature");
     return false;
   }
 
@@ -77,20 +69,6 @@ function extractPayment(body) {
   return body?.payload?.payment?.entity || null;
 }
 
-/* ================== RETRY FUNCTION ================== */
-
-async function retryQuery(query, params, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await db.query(query, params);
-    } catch (err) {
-      console.log(`⚠ DB retry ${i + 1}`);
-      if (i === retries - 1) throw err;
-      await new Promise(r => setTimeout(r, 1000));
-    }
-  }
-}
-
 /* ================== STORE PAYMENT ================== */
 
 async function storePaymentToCRM(payment, event) {
@@ -100,7 +78,7 @@ async function storePaymentToCRM(payment, event) {
     return;
   }
 
-  const insertSql = table => `
+  const insertSql = (table) => `
   INSERT INTO ${table}
   (payment_id, order_id, email, phone, customer_name, city,
    amount, currency, status, event, method, paid_at)
@@ -123,17 +101,17 @@ async function storePaymentToCRM(payment, event) {
     new Date(payment.created_at * 1000)
   ];
 
-  await retryQuery(insertSql("crm_payments"), params);
-  console.log(`✅ Stored in crm_payments`);
+  await db.query(insertSql("crm_payments"), params);
+  console.log(`✅ Stored in crm_payments: ${payment.id}`);
 
   if (payment.amount === AMOUNT_96) {
-    await retryQuery(insertSql("crm_96"), params);
-    console.log(`✅ Stored in crm_96`);
+    await db.query(insertSql("crm_96"), params);
+    console.log(`✅ Stored in crm_96: ${payment.id}`);
   }
 
   if (payment.amount === AMOUNT_1500) {
-    await retryQuery(insertSql("crm_1500"), params);
-    console.log(`✅ Stored in crm_1500`);
+    await db.query(insertSql("crm_1500"), params);
+    console.log(`✅ Stored in crm_1500: ${payment.id}`);
   }
 }
 
@@ -151,10 +129,12 @@ app.post("/razorpay-webhook", async (req, res) => {
   const payment = extractPayment(req.body);
 
   if (!payment) {
-    return res.status(200).send("No payment entity");
+    return res.status(200).send("No payment");
   }
 
   const time = timestampInKolkata(payment.created_at);
+
+  /* ===== LOG PAYMENT DETAILS ===== */
 
   const amount = payment.amount ? payment.amount / 100 : 0;
   const email = payment.email || "N/A";
@@ -177,11 +157,11 @@ app.post("/razorpay-webhook", async (req, res) => {
 
     await storePaymentToCRM(payment, event);
 
-    res.status(200).send("Webhook processed");
+    res.status(200).send("OK");
 
   } catch (err) {
 
-    console.error("❌ Webhook processing failed:", err);
+    console.error("❌ Webhook error:", err);
 
     res.status(500).send("Server error");
   }
@@ -189,8 +169,8 @@ app.post("/razorpay-webhook", async (req, res) => {
 
 /* ================== HEALTH CHECK ================== */
 
-app.get("/", (req, res) => {
-  res.send("✔ Razorpay Webhook Server Running");
+app.get("/razorpay-webhook", (req, res) => {
+  res.send("✔ Razorpay Webhook Active");
 });
 
 /* ================== START SERVER ================== */
