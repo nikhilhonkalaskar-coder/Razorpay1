@@ -15,15 +15,14 @@ const AMOUNT_96 = 9600;
 
 /* ================== POSTGRES CONNECTION ================== */
 
-const db = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 5432,
-  ssl: { rejectUnauthorized: false },
-});
+const { Pool } = require("pg");
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 /* ================== RAW BODY ================== */
 
 app.use(
@@ -163,4 +162,5 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
