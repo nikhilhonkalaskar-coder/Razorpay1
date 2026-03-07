@@ -17,7 +17,7 @@ const AMOUNT_1500 = 150000;
 const db = new Pool({
   host: "aws-1-ap-south-1.pooler.supabase.com",
   user: "postgres.rdutjyuqvnzkgjodamue",
-  password: "5DsbSqyMbDgA3Ibw",
+  password: "KW4mEF3ZRLWqiZsg",
   database: "postgres",
   port: 5432,
   ssl: { rejectUnauthorized: false },
@@ -161,3 +161,4 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
