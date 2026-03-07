@@ -90,7 +90,7 @@ app.post("/webhook", async (req, res) => {
           payment.currency,
           payment.status,
           event,
-          payment.method
+          payment.method,
           new Date()
         ]
       );
@@ -113,6 +113,7 @@ app.post("/webhook", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
 
