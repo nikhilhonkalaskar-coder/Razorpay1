@@ -19,10 +19,9 @@ const db = new Pool({
   user: "postgres.rdutjyuqvnzkgjodamue",
   password: "5DsbSqyMbDgA3Ibw",
   database: "postgres",
-  port: 6543, // Supabase pooler port
+  port: 5432,
   ssl: { rejectUnauthorized: false },
-  max: 10,
-  connectionTimeoutMillis: 10000
+  max: 10
 });
 
 /* ================== DB CONNECTION TEST ================== */
@@ -54,7 +53,7 @@ function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
 
   if (!signature) {
-    console.log("❌ Missing Razorpay signature");
+    console.log("❌ Missing signature");
     return false;
   }
 
@@ -130,10 +129,12 @@ app.post("/razorpay-webhook", async (req, res) => {
   const payment = extractPayment(req.body);
 
   if (!payment) {
-    return res.status(200).send("No payment payload");
+    return res.status(200).send("No payment");
   }
 
   const time = timestampInKolkata(payment.created_at);
+
+  /* ===== LOG PAYMENT DETAILS ===== */
 
   const amount = payment.amount ? payment.amount / 100 : 0;
   const email = payment.email || "N/A";
@@ -177,4 +178,3 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
