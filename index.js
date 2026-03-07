@@ -17,11 +17,12 @@ const AMOUNT_1500 = 150000;
 const db = new Pool({
   host: "aws-1-ap-south-1.pooler.supabase.com",
   user: "postgres.rdutjyuqvnzkgjodamue",
-  password: "5DsbSqyMbDgA3Ibw",
+  password: "YOUR_NEW_PASSWORD",
   database: "postgres",
-  port: 5432,
+  port: 6543, // Supabase pooler port
   ssl: { rejectUnauthorized: false },
-  max: 10
+  max: 10,
+  connectionTimeoutMillis: 10000
 });
 
 /* ================== DB CONNECTION TEST ================== */
@@ -53,7 +54,7 @@ function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
 
   if (!signature) {
-    console.log("❌ Missing signature");
+    console.log("❌ Missing Razorpay signature");
     return false;
   }
 
@@ -129,12 +130,27 @@ app.post("/razorpay-webhook", async (req, res) => {
   const payment = extractPayment(req.body);
 
   if (!payment) {
-    return res.status(200).send("No payment");
+    return res.status(200).send("No payment payload");
   }
 
   const time = timestampInKolkata(payment.created_at);
 
-  console.log(`[${time}] ${event} | ${payment.id} | ₹${payment.amount / 100}`);
+  const amount = payment.amount ? payment.amount / 100 : 0;
+  const email = payment.email || "N/A";
+  const phone = payment.contact || "N/A";
+  const name = payment.notes?.name || "N/A";
+  const city = payment.notes?.city || "N/A";
+
+  console.log("\n================ PAYMENT RECEIVED ================");
+  console.log(`[${time}] 💰 Payment ID : ${payment.id}`);
+  console.log(`[${time}] 💳 Status     : ${payment.status}`);
+  console.log(`[${time}] 💵 Amount     : ₹${amount}`);
+  console.log(`[${time}] 🏦 Method     : ${payment.method}`);
+  console.log(`[${time}] 👤 Email      : ${email}`);
+  console.log(`[${time}] 📞 Phone      : ${phone}`);
+  console.log(`[${time}] 🧑 Name       : ${name}`);
+  console.log(`[${time}] 🌆 City       : ${city}`);
+  console.log("=================================================\n");
 
   try {
 
