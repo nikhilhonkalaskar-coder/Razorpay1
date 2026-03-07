@@ -9,7 +9,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// Amounts in paise
 const AMOUNT_1500 = 150000;
 const AMOUNT_96 = 9600;
 
@@ -22,6 +21,22 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000
 });
+
+/* ===== TEST DATABASE CONNECTION ===== */
+
+async function testDB() {
+  try {
+    const client = await pool.connect();
+    const res = await client.query("SELECT NOW()");
+    console.log("✅ Database connected successfully");
+    console.log("📅 DB Server Time:", res.rows[0].now);
+    client.release();
+  } catch (err) {
+    console.error("❌ Database connection failed:", err.message);
+  }
+}
+
+testDB();
 
 /* ================== RAW BODY ================== */
 
@@ -61,7 +76,6 @@ function timestampInKolkata(unix) {
 /* ================== STORE TO CRM ================== */
 
 async function storePaymentToCRM(payment, event) {
-  if (payment.status !== "captured") return;
 
   const sql = (table) => `
     INSERT INTO ${table}
@@ -86,29 +100,45 @@ async function storePaymentToCRM(payment, event) {
     new Date(payment.created_at * 1000),
   ];
 
-  let client;
+  async function insert() {
+
+    const client = await pool.connect();
+
+    try {
+
+      await client.query(sql("crm_payments"), params);
+      console.log(`✅ Stored in crm_payments → ${payment.id}`);
+
+      if (payment.amount === AMOUNT_1500) {
+        await client.query(sql("crm_1500"), params);
+        console.log(`✅ Stored in crm_1500 → ${payment.id}`);
+      }
+
+      if (payment.amount === AMOUNT_96) {
+        await client.query(sql("crm_96"), params);
+        console.log(`✅ Stored in crm_96 → ${payment.id}`);
+      }
+
+    } finally {
+      client.release();
+    }
+  }
 
   try {
 
-    client = await pool.connect();
-
-    await client.query(sql("crm_payments"), params);
-    console.log(`✅ Stored in crm_payments → ${payment.id}`);
-
-    if (payment.amount === AMOUNT_1500) {
-      await client.query(sql("crm_1500"), params);
-      console.log(`✅ Stored in crm_1500 → ${payment.id}`);
-    }
-
-    if (payment.amount === AMOUNT_96) {
-      await client.query(sql("crm_96"), params);
-      console.log(`✅ Stored in crm_96 → ${payment.id}`);
-    }
+    await insert();
 
   } catch (err) {
-    console.error("❌ DB Insert Error:", err.message);
-  } finally {
-    if (client) client.release();
+
+    console.log("⚠ DB timeout, retrying...");
+
+    try {
+      await insert();
+      console.log("✅ Retry successful");
+    } catch (err2) {
+      console.error("❌ DB Insert Error:", err2.message);
+    }
+
   }
 }
 
@@ -130,14 +160,9 @@ app.post("/razorpay-webhook", async (req, res) => {
     const body = req.body;
     const event = body.event;
 
-    if (
-      ![
-        "payment.created",
-        "payment.authorized",
-        "payment.captured",
-        "payment.failed",
-      ].includes(event)
-    ) {
+    /* ONLY PROCESS CAPTURED PAYMENTS */
+
+    if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
       return;
     }
@@ -165,7 +190,7 @@ app.post("/razorpay-webhook", async (req, res) => {
 /* ================== TEST ROUTE ================== */
 
 app.get("/razorpay-webhook", (req, res) => {
-  res.send("✔ Razorpay Webhook Active (PostgreSQL CRM)");
+  res.send("✔ Razorpay Webhook Active (Captured Payments Only)");
 });
 
 /* ================== START SERVER ================== */
