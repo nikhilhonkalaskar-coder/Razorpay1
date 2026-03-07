@@ -1,4 +1,3 @@
-
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
@@ -10,19 +9,19 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-/* Amounts in paise */
 const AMOUNT_1500 = 150000;
 const AMOUNT_96 = 9600;
 
-/* ================== POSTGRES CONNECTION ================== */
+/* ================== DATABASE ================== */
+/* Works for Render / Supabase */
 
 const db = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 5432,
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
 });
 
 /* ================== RAW BODY ================== */
@@ -60,19 +59,37 @@ function timestampInKolkata(unix) {
   });
 }
 
+/* ================== SAFE DB QUERY ================== */
+
+async function safeQuery(query, params) {
+  try {
+    return await db.query(query, params);
+  } catch (err) {
+
+    console.log("⚠️ DB retry...");
+
+    await new Promise(r => setTimeout(r, 2000));
+
+    return await db.query(query, params);
+  }
+}
+
 /* ================== DUPLICATE CHECK ================== */
 
 async function paymentExists(paymentId) {
-  const result = await db.query(
+
+  const result = await safeQuery(
     "SELECT payment_id FROM crm_payments WHERE payment_id=$1",
     [paymentId]
   );
+
   return result.rows.length > 0;
 }
 
 /* ================== STORE TO CRM ================== */
 
 async function storePaymentToCRM(payment, event) {
+
   if (payment.status !== "captured") {
     console.log("⏭ Payment not captured yet");
     return;
@@ -106,16 +123,26 @@ async function storePaymentToCRM(payment, event) {
     new Date(payment.created_at * 1000),
   ];
 
-  await db.query(sql("crm_payments"), params);
+  /* Main CRM table */
+
+  await safeQuery(sql("crm_payments"), params);
   console.log(`✅ Stored in crm_payments → ${payment.id}`);
 
+  /* ₹1500 product */
+
   if (payment.amount === AMOUNT_1500) {
-    await db.query(sql("crm_1500"), params);
+
+    await safeQuery(sql("crm_1500"), params);
+
     console.log(`✅ Stored in crm_1500 → ${payment.id}`);
   }
 
+  /* ₹96 product */
+
   if (payment.amount === AMOUNT_96) {
-    await db.query(sql("crm_96"), params);
+
+    await safeQuery(sql("crm_96"), params);
+
     console.log(`✅ Stored in crm_96 → ${payment.id}`);
   }
 }
@@ -127,12 +154,14 @@ app.post("/razorpay-webhook", async (req, res) => {
   console.log("\n📩 Razorpay webhook received");
 
   /* Verify signature */
+
   if (!verifySignature(req)) {
     console.log("❌ Signature mismatch");
     return res.status(400).send("Invalid signature");
   }
 
-  /* ACK Razorpay immediately */
+  /* ACK immediately */
+
   res.status(200).send("OK");
 
   try {
@@ -140,13 +169,15 @@ app.post("/razorpay-webhook", async (req, res) => {
     const body = req.body;
     const event = body.event;
 
-    /* Only process captured payments */
+    /* Process only successful payments */
+
     if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
       return;
     }
 
     const payment = extractPayment(body);
+
     if (!payment) return;
 
     const time = timestampInKolkata(payment.created_at);
@@ -159,10 +190,20 @@ app.post("/razorpay-webhook", async (req, res) => {
     console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
     console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
 
-    await storePaymentToCRM(payment, event);
+    try {
+
+      await storePaymentToCRM(payment, event);
+
+    } catch (dbError) {
+
+      console.error("❌ Database error:", dbError.message);
+
+    }
 
   } catch (err) {
+
     console.error("❌ Webhook error:", err);
+
   }
 
 });
@@ -170,11 +211,15 @@ app.post("/razorpay-webhook", async (req, res) => {
 /* ================== HEALTH CHECK ================== */
 
 app.get("/razorpay-webhook", (req, res) => {
+
   res.send("✔ Razorpay Webhook Active (PostgreSQL CRM)");
+
 });
 
 /* ================== START SERVER ================== */
 
 app.listen(PORT, () => {
+
   console.log(`🚀 Server running on port ${PORT}`);
+
 });
