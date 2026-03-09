@@ -1,3 +1,4 @@
+
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
@@ -82,6 +83,9 @@ async function insertPayment(table, params, paymentId) {
 async function storePaymentToCRM(payment, event) {
   if (payment.status !== "captured") return;
 
+  /* exact payment time */
+  const paidTimestamp = payment.captured_at || payment.created_at;
+
   const params = [
     payment.id,
     payment.order_id,
@@ -94,7 +98,7 @@ async function storePaymentToCRM(payment, event) {
     payment.status,
     event,
     payment.method,
-    new Date(payment.created_at * 1000),
+    new Date(paidTimestamp * 1000),
   ];
 
   /* MAIN CRM TABLE */
@@ -154,7 +158,7 @@ app.post("/razorpay-webhook", async (req, res) => {
 
     await storePaymentToCRM(payment, event);
   } catch (err) {
-    console.error("❌ Webhook error:", err.message);
+    console.error("❌ Webhook error:", err);
   }
 });
 
