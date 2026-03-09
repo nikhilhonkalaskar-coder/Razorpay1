@@ -130,10 +130,14 @@ app.post("/razorpay-webhook", async (req, res) => {
     const payment = extractPayment(body);
     if (!payment) return;
 
-    console.log(`💰 Payment: ${payment.id}`);
-    console.log(`💵 Amount: ₹${payment.amount / 100}`);
-    console.log(`👤 Email: ${payment.email || "N/A"}`);
-    console.log(`📞 Phone: ${payment.contact || "N/A"}`);
+   
+    console.log(`[${time}] 💰 Payment: ${payment.id}`);
+    console.log(`[${time}] 💳 Status: ${payment.status}`);
+    console.log(`[${time}] 💵 Amount: ₹${payment.amount / 100}`);
+    console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
+    console.log(`[${time}] 📞 Phone: ${payment.contact || "N/A"}`);
+    console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
+    console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
 
     await storePaymentToCRM(payment, event);
   } catch (err) {
@@ -152,3 +156,4 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
