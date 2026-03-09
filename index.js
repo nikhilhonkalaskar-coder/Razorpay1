@@ -1,19 +1,19 @@
-
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
 const app = express();
+
 /* ================== CONFIG ================== */
+
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // Amounts in paise
-// const AMOUNT_99 = 9900;
 const AMOUNT_1500 = 150000;
 const AMOUNT_96 = 9600;
 
-/* ================== POSTGRES CONNECTION ================== */
+/* ================== POSTGRES ================== */
 
 const db = new Pool({
   host: process.env.DB_HOST,
@@ -58,17 +58,29 @@ function timestampInKolkata(unix) {
     hour12: false,
   });
 }
-/* ================== STORE TO CRM ================== */
-async function storePaymentToCRM(payment, event) {
-  if (payment.status !== "captured") return;
 
-  const sql = (table) => `
+/* ================== STORE PAYMENT ================== */
+
+async function insertPayment(table, params, paymentId) {
+  const sql = `
     INSERT INTO ${table}
     (payment_id, order_id, email, phone, customer_name, city,
      amount, currency, status, event, method, paid_at)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (payment_id) DO NOTHING
   `;
+
+  const result = await db.query(sql, params);
+
+  if (result.rowCount > 0) {
+    console.log(`✅ Stored in ${table} → ${paymentId}`);
+  } else {
+    console.log(`⚠ Duplicate ignored in ${table} → ${paymentId}`);
+  }
+}
+
+async function storePaymentToCRM(payment, event) {
+  if (payment.status !== "captured") return;
 
   const params = [
     payment.id,
@@ -85,23 +97,19 @@ async function storePaymentToCRM(payment, event) {
     new Date(payment.created_at * 1000),
   ];
 
-  await db.query(sql("crm_payments"), params);
-  console.log(`✅ Stored in crm_payments → ${payment.id}`);
+  /* MAIN CRM TABLE */
 
-  // if (payment.amount === AMOUNT_99) {
-  //   await db.query(sql("crm_99"), params);
-  //   console.log(`✅ Stored in crm_99 → ${payment.id}`);
-  // }
+  await insertPayment("crm_payments", params, payment.id);
+
+  /* COURSE CRM TABLES */
 
   if (payment.amount === AMOUNT_1500) {
-    await db.query(sql("crm_1500"), params);
-    console.log(`✅ Stored in crm_1500 → ${payment.id}`);
+    await insertPayment("crm_1500", params, payment.id);
   }
 
   if (payment.amount === AMOUNT_96) {
-    await db.query(sql("crm_96"), params);
-    console.log(`✅ stored in crm_96 → ${payment.id}`);
-               }
+    await insertPayment("crm_96", params, payment.id);
+  }
 }
 
 /* ================== WEBHOOK ================== */
@@ -109,26 +117,24 @@ async function storePaymentToCRM(payment, event) {
 app.post("/razorpay-webhook", async (req, res) => {
   console.log("\n📩 Razorpay webhook received");
 
+  /* VERIFY SIGNATURE */
+
   if (!verifySignature(req)) {
     console.log("❌ Signature mismatch");
     return res.status(400).send("Invalid signature");
   }
 
-  // ACK Razorpay immediately
+  /* ACK FAST */
+
   res.status(200).send("OK");
 
   try {
     const body = req.body;
     const event = body.event;
 
-    if (
-      ![
-        "payment.created",
-        "payment.authorized",
-        "payment.captured",
-        "payment.failed",
-      ].includes(event)
-    ) {
+    /* PROCESS ONLY CAPTURED PAYMENTS */
+
+    if (event !== "payment.captured") {
       console.log(`⏭ Ignored event: ${event}`);
       return;
     }
@@ -163,4 +169,3 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
